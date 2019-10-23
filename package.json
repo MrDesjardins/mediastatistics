@@ -1,0 +1,16 @@
+{
+  "name": "mediastatistics",
+  "version": "1.0.0",
+  "description": "Give statistic about pictures and video taken per year",
+  "main": "run.js",
+  "scripts": {
+    "build": "tsc && node build/run.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "picture",
+    "statustic"
+  ],
+  "author": "Patrick Desjardins",
+  "license": "ISC"
+}

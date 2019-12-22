@@ -6,7 +6,8 @@ import prettyBytes from "pretty-bytes";
 import prettyMilliseconds from "pretty-ms";
 import { createObjectCsvWriter } from "csv-writer";
 import { ObjectCsvWriterParams } from "csv-writer/src/lib/csv-writer-factory";
-const directoryRoot = ["C:\\Code\\deletemetest"];
+require("dotenv").config();
+const directoryRoot = (process.env.FOLDERS as string).split(","); // ["C:\\Code\\deletemetest"];
 const pictureExtensions = ["jpg", "png", "nef", "dng"];
 const videoExtensions = ["mp4", "mov", "wmv", "avi", "mpg"];
 

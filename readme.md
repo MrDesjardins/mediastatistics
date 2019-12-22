@@ -12,7 +12,7 @@ The project is to give insight to my personal pictures and videos taken.
 A `.env` file is needed with this format:
 
 ```
-FOLDERS=C:\\Code\\deletemetest,C:\\Code2\\deletemetest2
+FOLDERS=C:\Code\deletemetest,C:\Code2\deletemetest2
 ```
 
-All folders to analyze must be separated with a comma `,`.
+All folders to analyze must be separated with a comma `,` and does not need to be escaped.

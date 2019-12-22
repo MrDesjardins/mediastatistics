@@ -57,6 +57,7 @@ interface MediaFile {
 }
 function walk(dir: string, result: Result, done: FeedbackFunction) {
     let results: MediaFile[] = [];
+    
     fs.readdir(dir, function(err, list) {
         if (err) {
             return done(dir, result, err);
@@ -254,5 +255,6 @@ const finalResult: FeedbackFunction = (root: string, result: Result, err: Error 
 
 const startTime = process.hrtime();
 directoryRoot.forEach((root: string, index: number) => {
+    console.log(`Analyzing ${root} folder`);
     walk(root, result, finalResult);
 });

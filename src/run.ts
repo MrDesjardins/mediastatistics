@@ -4,11 +4,35 @@ import * as fs from "fs";
 import { getVideoDurationInSeconds } from "get-video-duration";
 import prettyBytes from "pretty-bytes";
 import prettyMilliseconds from "pretty-ms";
-// const directoryRoot = ["F:\\images\\Patrick_Melodie"];
-// const directoryRoot = ["C:\\Code\\deletemetest"];
-const directoryRoot = ["F:\\images\\Patrick_Melodie", "F:\\images\\_GooglePhotos", "F:\\footages"];
+import { createObjectCsvWriter } from "csv-writer";
+import { ObjectCsvWriterParams } from "csv-writer/src/lib/csv-writer-factory";
+const directoryRoot = ["C:\\Code\\deletemetest"];
 const pictureExtensions = ["jpg", "png", "nef", "dng"];
 const videoExtensions = ["mp4", "mov", "wmv", "avi", "mpg"];
+
+const paramCsvWriter: ObjectCsvWriterParams = {
+    path: "out.csv",
+    header: [
+        { id: "year", title: "year" },
+        { id: "jpg", title: "jpg (count)" },
+        { id: "raw", title: "raw (count)" },
+        { id: "video", title: "video (count)" },
+        { id: "picturesize", title: "picture size (byte)" },
+        { id: "videosize", title: "video size (byte)" },
+        { id: "videolength", title: "video length (ms)" },
+    ],
+};
+const csvWriter = createObjectCsvWriter(paramCsvWriter);
+
+interface CSVResult {
+    year: number;
+    jpg: number;
+    raw: number;
+    video: number;
+    picturesize: number;
+    videosize: number;
+    videolength: number;
+}
 
 const result: Result = {
     year: {},
@@ -126,6 +150,7 @@ function extractIsMofidied(filePath: string): boolean {
     return fileName.substring(0, 1) === "_";
 }
 function display(result: Result): void {
+    const dataCSV: CSVResult[] = [];
     const listYearsData: YearlyResult[] = [];
     Object.entries(result.year).forEach(([key, yearValue]) => {
         listYearsData.push(yearValue);
@@ -145,6 +170,20 @@ function display(result: Result): void {
             console.log(`Picture size: ${prettyBytes(yearValue.pictureSize)}`);
             console.log(`Video size: ${prettyBytes(yearValue.videoSize)}`);
             console.log(`Video duration: ${prettyMilliseconds(yearValue.videoDuration * 1000)}`);
+            dataCSV.push({
+                year: yearValue.year,
+                jpg: yearValue.typesCount["jpg"] ?? 0,
+                raw: yearValue.typesCount["nef"] ?? 0,
+                video:
+                    (yearValue.typesCount["mp4"] ?? 0) +
+                    (yearValue.typesCount["mov"] ?? 0) +
+                    (yearValue.typesCount["wmv"] ?? 0) +
+                    (yearValue.typesCount["avi"] ?? 0) +
+                    (yearValue.typesCount["mpg"] ?? 0),
+                picturesize: yearValue.pictureSize,
+                videosize: yearValue.videoSize,
+                videolength: yearValue.videoDuration * 1000,
+            });
         });
     console.log("------------------------------------------------------------");
     console.log(`Total pictures: ${result.pictureCount}`);
@@ -153,6 +192,7 @@ function display(result: Result): void {
     console.log(`Total picture size: ${prettyBytes(result.pictureSize)}`);
     console.log(`Total video size: ${prettyBytes(result.videoSize)}`);
     console.log(`Total video duration: ${prettyMilliseconds(result.videoDuration * 1000)}`);
+    csvWriter.writeRecords(dataCSV).then(() => console.log("The CSV file was written successfully"));
 }
 const finalResult: FeedbackFunction = (root: string, result: Result, err: Error | null, results?: MediaFile[]) => {
     if (err != null) {
@@ -169,9 +209,9 @@ const finalResult: FeedbackFunction = (root: string, result: Result, err: Error 
                         year: year,
                         typesCount: {},
                         modifiedCount: 0,
-                        pictureSize:0,
-                        videoDuration:0,
-                        videoSize:0
+                        pictureSize: 0,
+                        videoDuration: 0,
+                        videoSize: 0,
                     };
                 }
                 const isPicture = pictureExtensions.includes(extension.toLocaleLowerCase());

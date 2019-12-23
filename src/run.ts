@@ -1,4 +1,3 @@
-import * as g from "glob";
 import * as path from "path";
 import * as fs from "fs";
 import { getVideoDurationInSeconds } from "get-video-duration";
@@ -6,11 +5,14 @@ import prettyBytes from "pretty-bytes";
 import prettyMilliseconds from "pretty-ms";
 import { createObjectCsvWriter } from "csv-writer";
 import { ObjectCsvWriterParams } from "csv-writer/src/lib/csv-writer-factory";
+import { ExifImage } from "exif";
+import { ObjectMap } from "csv-writer/src/lib/lang";
 require("dotenv").config();
 const directoryRoot = (process.env.FOLDERS as string).split(","); // ["C:\\Code\\deletemetest"];
 const pictureExtensions = ["jpg", "png", "nef", "dng"];
 const videoExtensions = ["mp4", "mov", "wmv", "avi", "mpg"];
-
+const isVideoLengthExtracted = (process.env.VIDEO_ENABLED ?? "true") === "true";
+const isExifExtracted = (process.env.EXIF_ENABLED ?? "true") === "true";
 const paramCsvWriter: ObjectCsvWriterParams = {
     path: "out.csv",
     header: [
@@ -23,7 +25,15 @@ const paramCsvWriter: ObjectCsvWriterParams = {
         { id: "videolength", title: "video length (ms)" },
     ],
 };
+const paramCsvWriter2: ObjectCsvWriterParams = {
+    path: "out2.csv",
+    header: [
+        { id: "device", title: "Device" },
+        { id: "count", title: "jpg (count)" },
+    ],
+};
 const csvWriter = createObjectCsvWriter(paramCsvWriter);
+const csvWriter2 = createObjectCsvWriter(paramCsvWriter2);
 
 interface CSVResult {
     year: number;
@@ -43,6 +53,7 @@ const result: Result = {
     pictureSize: 0,
     videoSize: 0,
     videoDuration: 0,
+    source: {},
 };
 let finalCount = 0;
 interface FeedbackFunction {
@@ -54,10 +65,11 @@ interface MediaFile {
     sizeInByte: number;
     extension: string;
     durationLength: number;
+    source: string;
 }
 function walk(dir: string, result: Result, done: FeedbackFunction) {
     let results: MediaFile[] = [];
-    
+
     fs.readdir(dir, function(err, list) {
         if (err) {
             return done(dir, result, err);
@@ -80,7 +92,7 @@ function walk(dir: string, result: Result, done: FeedbackFunction) {
                     });
                 } else {
                     const ext = extractExtension(file);
-                    if (videoExtensions.includes(ext)) {
+                    if (isVideoLengthExtracted && videoExtensions.includes(ext)) {
                         let duration1 = 0;
                         getVideoDurationInSeconds(file)
                             .then((duration: number) => {
@@ -95,20 +107,50 @@ function walk(dir: string, result: Result, done: FeedbackFunction) {
                                     fullPath: file,
                                     sizeInByte: stat.size,
                                     durationLength: duration1,
+                                    source: "unknown",
                                 });
                                 if (!--pending) {
                                     done(dir, result, null, results);
                                 }
                             });
                     } else {
-                        results.push({
-                            extension: extractExtension(file),
-                            fullPath: file,
-                            sizeInByte: stat.size,
-                            durationLength: 0,
-                        });
-                        if (!--pending) {
-                            done(dir, result, null, results);
+                        if (isExifExtracted && ext === "jpg") {
+                            try {
+                                new ExifImage({ image: file }, function(error, exifData) {
+                                    // if (error) {
+                                    //     console.log("Error: " + error.message);
+                                    // }
+                                    results.push({
+                                        extension: extractExtension(file),
+                                        fullPath: file,
+                                        sizeInByte: stat.size,
+                                        durationLength: 0,
+                                        source:
+                                            exifData !== undefined
+                                                ? exifData.image.Make + " " + exifData.image.Model
+                                                : "unknown",
+                                    });
+                                    if (!--pending) {
+                                        done(dir, result, null, results);
+                                    }
+                                });
+                            } catch (error) {
+                                console.log("Error: " + error.message);
+                                if (!--pending) {
+                                    done(dir, result, null, results);
+                                }
+                            }
+                        } else {
+                            results.push({
+                                extension: extractExtension(file),
+                                fullPath: file,
+                                sizeInByte: stat.size,
+                                durationLength: 0,
+                                source: "unknown",
+                            });
+                            if (!--pending) {
+                                done(dir, result, null, results);
+                            }
                         }
                     }
                 }
@@ -123,6 +165,7 @@ interface Result {
     videoCount: number;
     pictureModified: number;
     pictureSize: number;
+    source: { [id: string]: number };
     videoSize: number;
     videoDuration: number;
 }
@@ -136,11 +179,14 @@ interface YearlyResult {
 }
 
 function extractYear(root: string, filePath: string): number {
-    const rootLength = root.length;
-    const removedRoot = filePath.substring(rootLength);
-    const yearStr = removedRoot.split(path.sep)[1];
-    const yearNumber = Number(yearStr);
-    return yearNumber;
+    const regex = /(\b)\\([0-9]{4})\\?(\b)/g;
+    const groups = regex.exec(filePath);
+    if (groups !== null) {
+        const yearStr = groups[2];
+        const yearNumber = Number(yearStr);
+        return yearNumber;
+    }
+    return NaN;
 }
 function extractExtension(filePath: string): string {
     const extension = path.extname(filePath).substring(1);
@@ -154,6 +200,10 @@ function extractIsMofidied(filePath: string): boolean {
 function display(result: Result): void {
     const dataCSV: CSVResult[] = [];
     const listYearsData: YearlyResult[] = [];
+    const listModelMakeData: ObjectMap<{ device: string; count: number }>[] = [];
+    Object.entries(result.source).forEach(([name, countDevice]) => {
+        listModelMakeData.push({ device: name, count: countDevice } as any);
+    });
     Object.entries(result.year).forEach(([key, yearValue]) => {
         listYearsData.push(yearValue);
     });
@@ -187,6 +237,10 @@ function display(result: Result): void {
                 videolength: yearValue.videoDuration * 1000,
             });
         });
+    Object.entries(listModelMakeData).forEach(([index, data]) => {
+        console.log(`Device ${data.device}: ${data.count}`);
+    });
+
     console.log("------------------------------------------------------------");
     console.log(`Total pictures: ${result.pictureCount}`);
     console.log(`Total videos: ${result.videoCount}`);
@@ -194,7 +248,12 @@ function display(result: Result): void {
     console.log(`Total picture size: ${prettyBytes(result.pictureSize)}`);
     console.log(`Total video size: ${prettyBytes(result.videoSize)}`);
     console.log(`Total video duration: ${prettyMilliseconds(result.videoDuration * 1000)}`);
-    csvWriter.writeRecords(dataCSV).then(() => console.log("The CSV file was written successfully"));
+    csvWriter
+        .writeRecords(dataCSV)
+        .then(() => console.log("The CSV file with count, bytes and time was written successfully"));
+    csvWriter2
+        .writeRecords(listModelMakeData)
+        .then(() => console.log("The CSV for devices file was written successfully"));
 }
 const finalResult: FeedbackFunction = (root: string, result: Result, err: Error | null, results?: MediaFile[]) => {
     if (err != null) {
@@ -233,6 +292,11 @@ const finalResult: FeedbackFunction = (root: string, result: Result, err: Error 
                         result.pictureCount += 1;
                         result.year[year].pictureSize += media.sizeInByte;
                         result.pictureSize += media.sizeInByte;
+                        if (result.source[media.source] === undefined) {
+                            result.source[media.source] = 1;
+                        } else {
+                            result.source[media.source]++;
+                        }
                     }
                     if (isVideo) {
                         result.videoCount += 1;
@@ -242,6 +306,8 @@ const finalResult: FeedbackFunction = (root: string, result: Result, err: Error 
                         result.videoDuration += media.durationLength;
                     }
                 }
+            } else {
+                console.error(`Error extracting year for : ${media.fullPath}`);
             }
         });
     }
@@ -249,7 +315,7 @@ const finalResult: FeedbackFunction = (root: string, result: Result, err: Error 
     if (finalCount == directoryRoot.length) {
         display(result);
         const end = process.hrtime(startTime);
-        console.log(`Executed in ${end[0]} seconds`);
+        console.log(`Executed in ${prettyMilliseconds(end[0] * 1000)} `);
     }
 };
 

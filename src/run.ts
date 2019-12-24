@@ -7,6 +7,7 @@ import { createObjectCsvWriter } from "csv-writer";
 import { ObjectCsvWriterParams } from "csv-writer/src/lib/csv-writer-factory";
 import { ExifImage } from "exif";
 import { ObjectMap } from "csv-writer/src/lib/lang";
+import * as async from "async";
 require("dotenv").config();
 const directoryRoot = (process.env.FOLDERS as string).split(","); // ["C:\\Code\\deletemetest"];
 const pictureExtensions = ["jpg", "png", "nef", "dng"];
@@ -67,6 +68,48 @@ interface MediaFile {
     durationLength: number;
     source: string;
 }
+interface TaskQueueExifPayload {
+    file: string;
+}
+interface TaskQueueExifCallback {
+    source: string;
+}
+
+interface TaskQueueVideoCallback {
+    duration: number;
+}
+let queueAsyncExif = async.queue<TaskQueueExifPayload, TaskQueueExifCallback, Error>(function(task, callback) {
+    const file = task.file;
+    new ExifImage({ image: file }, function(error, exifData) {
+        if (error) {
+            console.error("Error: " + error.message + ", " + error.stack);
+        }
+        callback(error, {
+            source: error ? "errorreadingexif" : exifData.image?.Make + " " + exifData.image?.Model,
+        });
+    });
+}, 1000);
+
+let queueAsyncVideo = async.queue<TaskQueueExifPayload, TaskQueueVideoCallback, Error>(function(task, callback) {
+    const file = task.file;
+
+    let duration1 = 0;
+    let error: Error | undefined;
+    getVideoDurationInSeconds(file)
+        .then((duration: number) => {
+            duration1 = duration;
+        })
+        .catch(err => {
+            console.error(`Cannot get size of ${file} because of ${err}`);
+            error = err;
+        })
+        .finally(() => {
+            callback(error, {
+                duration: error ? 0 : duration1,
+            });
+        });
+}, 500);
+
 function walk(dir: string, result: Result, done: FeedbackFunction) {
     let results: MediaFile[] = [];
 
@@ -94,46 +137,38 @@ function walk(dir: string, result: Result, done: FeedbackFunction) {
                     const ext = extractExtension(file);
                     if (isVideoLengthExtracted && videoExtensions.includes(ext)) {
                         let duration1 = 0;
-                        getVideoDurationInSeconds(file)
-                            .then((duration: number) => {
-                                duration1 = duration;
-                            })
-                            .catch(err => {
-                                console.error(`Cannot get size of ${file} because of ${err}`);
-                            })
-                            .finally(() => {
-                                results.push({
-                                    extension: extractExtension(file),
-                                    fullPath: file,
-                                    sizeInByte: stat.size,
-                                    durationLength: duration1,
-                                    source: "unknown",
-                                });
-                                if (!--pending) {
-                                    done(dir, result, null, results);
-                                }
+                        queueAsyncVideo.push<TaskQueueVideoCallback>({ file }, (err, callbackResult) => {
+                            results.push({
+                                extension: extractExtension(file),
+                                fullPath: file,
+                                sizeInByte: stat.size,
+                                durationLength: callbackResult === undefined ? 0 : callbackResult.duration,
+                                source: "unknown",
                             });
+                            if (!--pending) {
+                                done(dir, result, null, results);
+                            }
+                        });
                     } else {
                         if (isExifExtracted && ext === "jpg") {
                             try {
-                                new ExifImage({ image: file }, function(error, exifData) {
-                                    // if (error) {
-                                    //     console.log("Error: " + error.message);
-                                    // }
-                                    results.push({
-                                        extension: extractExtension(file),
-                                        fullPath: file,
-                                        sizeInByte: stat.size,
-                                        durationLength: 0,
-                                        source:
-                                            exifData !== undefined
-                                                ? exifData.image.Make + " " + exifData.image.Model
-                                                : "unknown",
-                                    });
-                                    if (!--pending) {
-                                        done(dir, result, null, results);
+                                queueAsyncExif.push<TaskQueueExifCallback>(
+                                    {
+                                        file: file,
+                                    },
+                                    (err, resultcallback) => {
+                                        results.push({
+                                            extension: extractExtension(file),
+                                            fullPath: file,
+                                            sizeInByte: stat.size,
+                                            durationLength: 0,
+                                            source: resultcallback === undefined ? "unknown jpg" : resultcallback.source,
+                                        });
+                                        if (!--pending) {
+                                            done(dir, result, null, results);
+                                        }
                                     }
-                                });
+                                );
                             } catch (error) {
                                 console.log("Error: " + error.message);
                                 if (!--pending) {
@@ -146,7 +181,7 @@ function walk(dir: string, result: Result, done: FeedbackFunction) {
                                 fullPath: file,
                                 sizeInByte: stat.size,
                                 durationLength: 0,
-                                source: "unknown",
+                                source: "unknown raw",
                             });
                             if (!--pending) {
                                 done(dir, result, null, results);
